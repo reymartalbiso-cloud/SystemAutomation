@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRightCircle,
   CheckCircle2,
@@ -16,6 +15,11 @@ import { StatusBadge } from "@/components/status-badge";
 import { Modal } from "@/components/modal";
 import { commission, formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import {
+  bulkRolloverCycle as storeBulkRollover,
+  rolloverEntry as storeRollover,
+  updateEntry as storeUpdateEntry,
+} from "@/lib/store";
 
 type Entry = {
   id: string;
@@ -43,8 +47,6 @@ type Props = {
 };
 
 export function AdminConsole({ currentCycleId, cycles, users, entries }: Props) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [cycleFilter, setCycleFilter] = useState<string>(currentCycleId);
@@ -86,62 +88,42 @@ export function AdminConsole({ currentCycleId, cycles, users, entries }: Props) 
     return { sales, pendingCom, paidCom };
   }, [filtered]);
 
-  async function patchEntry(id: string, body: Record<string, unknown>) {
-    setBusyId(id);
-    try {
-      const res = await fetch(`/api/entries/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert(data?.error ?? "Update failed.");
-      } else {
-        startTransition(() => router.refresh());
-      }
-    } finally {
-      setBusyId(null);
+  function patchEntry(
+    id: string,
+    body: {
+      status?: "PAID" | "PENDING";
+      commissionAmount?: number;
+      commissionRate?: number;
+      notes?: string | null;
     }
+  ) {
+    setBusyId(id);
+    storeUpdateEntry(id, body);
+    // brief busy state so users see the update registered
+    setTimeout(() => setBusyId(null), 120);
   }
 
   async function submitRollover(reason: string) {
     if (!rolloverEntry) return;
     setBusyId(rolloverEntry.id);
-    try {
-      const res = await fetch(`/api/entries/${rolloverEntry.id}/rollover`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert(data?.error ?? "Rollover failed.");
-      } else {
-        setRolloverEntry(null);
-        startTransition(() => router.refresh());
-      }
-    } finally {
-      setBusyId(null);
+    const err = storeRollover(rolloverEntry.id, reason);
+    setBusyId(null);
+    if (err) {
+      alert(err);
+      return;
     }
+    setRolloverEntry(null);
   }
 
   async function submitBulkRollover(reason: string) {
     if (!bulkRolloverCycle) return;
-    const res = await fetch(`/api/cycles/rollover-unpaid`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cycleId: bulkRolloverCycle.id, reason }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      alert(data?.error ?? "Rollover failed.");
+    const { movedCount, error } = storeBulkRollover(bulkRolloverCycle.id, reason);
+    if (error) {
+      alert(error);
       return;
     }
-    const data = await res.json();
     setBulkRolloverCycle(null);
-    alert(`Moved ${data.movedCount} pending entries to the next cycle.`);
-    startTransition(() => router.refresh());
+    alert(`Moved ${movedCount} pending entries to the next cycle.`);
   }
 
   return (
@@ -295,7 +277,7 @@ export function AdminConsole({ currentCycleId, cycles, users, entries }: Props) 
                         <CommissionEditor
                           saleAmount={e.saleAmount}
                           rate={e.commissionRate}
-                          disabled={busy || pending}
+                          disabled={busy}
                           onSave={(amount) =>
                             patchEntry(e.id, { commissionAmount: amount })
                           }

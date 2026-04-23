@@ -1,24 +1,46 @@
-import { requireRole } from "@/lib/auth";
-import { prisma } from "@/lib/db";
-import { getOrCreateCurrentCycle } from "@/lib/cycle";
-import { commission, formatCurrency } from "@/lib/format";
+"use client";
+
+import { useMemo } from "react";
+import { CalendarClock, CheckCircle2, Hourglass, TrendingUp } from "lucide-react";
 import { Topbar } from "@/components/topbar";
 import { StatCard } from "@/components/stat-card";
-import { CalendarClock, CheckCircle2, Hourglass, TrendingUp } from "lucide-react";
+import { RouteGuard } from "@/components/route-guard";
+import { useStore, getOrCreateCurrentCycle } from "@/lib/store";
+import { commission, formatCurrency } from "@/lib/format";
 import { EntryForm } from "./entry-form";
 import { PersonnelEntriesTable } from "./entries-table";
+import type { SessionUser } from "@/lib/auth-client";
 
-export const dynamic = "force-dynamic";
+export default function PersonnelPage() {
+  return (
+    <RouteGuard role="PERSONNEL">{(user) => <Content user={user} />}</RouteGuard>
+  );
+}
 
-export default async function PersonnelPage() {
-  const session = await requireRole("PERSONNEL");
-  const currentCycle = await getOrCreateCurrentCycle();
+function Content({ user }: { user: SessionUser }) {
+  const store = useStore();
 
-  const entries = await prisma.entry.findMany({
-    where: { userId: session.userId },
-    include: { cycle: true },
-    orderBy: [{ saleDate: "desc" }, { createdAt: "desc" }],
-  });
+  // Ensure a current cycle exists (creates one if missing)
+  const currentCycle = useMemo(() => {
+    if (store.cycles.length === 0) return null;
+    return getOrCreateCurrentCycle();
+  }, [store.cycles.length]);
+
+  const entries = useMemo(
+    () =>
+      store.entries
+        .filter((e) => e.userId === user.id)
+        .sort((a, b) => {
+          const d = b.saleDate.localeCompare(a.saleDate);
+          return d !== 0 ? d : b.createdAt.localeCompare(a.createdAt);
+        }),
+    [store.entries, user.id]
+  );
+
+  const cycleById = useMemo(
+    () => new Map(store.cycles.map((c) => [c.id, c])),
+    [store.cycles]
+  );
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -33,37 +55,37 @@ export default async function PersonnelPage() {
     .reduce((sum, e) => sum + commission(e.saleAmount, e.commissionRate), 0);
 
   const thisMonth = entries
-    .filter((e) => e.status === "PAID" && e.paidAt && e.paidAt >= monthStart)
+    .filter(
+      (e) => e.status === "PAID" && e.paidAt && new Date(e.paidAt) >= monthStart
+    )
     .reduce((sum, e) => sum + commission(e.saleAmount, e.commissionRate), 0);
 
   const thisYearSales = entries
-    .filter((e) => e.saleDate >= yearStart)
+    .filter((e) => new Date(e.saleDate) >= yearStart)
     .reduce((sum, e) => sum + e.saleAmount, 0);
 
   return (
     <div className="min-h-screen bg-slate-50">
       <Topbar
-        fullName={session.fullName}
+        fullName={user.fullName}
         subtitle="Personnel workspace"
         badge="Personnel"
       />
 
       <main className="mx-auto max-w-7xl px-6 py-8 space-y-8">
-        {/* Greeting */}
         <section>
           <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
-            Hi {session.fullName.split(" ")[0]} 👋
+            Hi {user.fullName.split(" ")[0]} 👋
           </h2>
           <p className="text-sm text-slate-500">
             Current cycle:{" "}
             <span className="font-medium text-slate-700">
-              {currentCycle.label}
+              {currentCycle?.label ?? "—"}
             </span>{" "}
             · Closes Friday
           </p>
         </section>
 
-        {/* Stats */}
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
             label="Total earned"
@@ -95,7 +117,6 @@ export default async function PersonnelPage() {
           />
         </section>
 
-        {/* Submit + entries */}
         <section className="grid gap-6 lg:grid-cols-5">
           <div className="lg:col-span-2">
             <div className="card p-6">
@@ -106,7 +127,7 @@ export default async function PersonnelPage() {
                 It'll land in the admin's queue for verification.
               </p>
               <div className="mt-5">
-                <EntryForm />
+                <EntryForm userId={user.id} />
               </div>
             </div>
           </div>
@@ -123,14 +144,14 @@ export default async function PersonnelPage() {
             <PersonnelEntriesTable
               entries={entries.map((e) => ({
                 id: e.id,
-                saleDate: e.saleDate.toISOString(),
+                saleDate: e.saleDate,
                 description: e.description,
                 clientName: e.clientName,
                 saleAmount: e.saleAmount,
                 commissionRate: e.commissionRate,
                 status: e.status,
                 notes: e.notes,
-                cycleLabel: e.cycle.label,
+                cycleLabel: cycleById.get(e.cycleId)?.label ?? "—",
                 rolled: !!e.rolledFromCycleId,
               }))}
             />

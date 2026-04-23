@@ -1,11 +1,10 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Loader2, Plus } from "lucide-react";
+import { createEntry } from "@/lib/store";
 
-export function EntryForm() {
-  const router = useRouter();
+export function EntryForm({ userId }: { userId: string }) {
   const today = new Date().toISOString().slice(0, 10);
   const [saleDate, setSaleDate] = useState(today);
   const [description, setDescription] = useState("");
@@ -14,37 +13,30 @@ export function EntryForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
+  function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError(null);
-    try {
-      const res = await fetch("/api/entries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          saleDate,
-          description,
-          clientName: clientName || null,
-          saleAmount: Number(saleAmount),
-        }),
+    const amount = Number(saleAmount);
+    if (!description.trim() || !amount || Number.isNaN(amount) || amount <= 0) {
+      setError("Description and a positive sale amount are required.");
+      return;
+    }
+    setLoading(true);
+    // tiny artificial delay so the spinner is visible; feels more real
+    setTimeout(() => {
+      createEntry({
+        userId,
+        saleDate,
+        description,
+        clientName: clientName || null,
+        saleAmount: amount,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data?.error ?? "Could not submit entry.");
-        setLoading(false);
-        return;
-      }
       setDescription("");
       setClientName("");
       setSaleAmount("");
       setSaleDate(today);
-      router.refresh();
-    } catch {
-      setError("Network error. Please try again.");
-    } finally {
       setLoading(false);
-    }
+    }, 150);
   }
 
   return (
@@ -90,7 +82,7 @@ export function EntryForm() {
           className="input"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="e.g. Brand identity package"
+          placeholder="e.g. 8kW rooftop solar install"
           required
         />
       </div>
@@ -104,7 +96,7 @@ export function EntryForm() {
           className="input"
           value={clientName}
           onChange={(e) => setClientName(e.target.value)}
-          placeholder="e.g. Acme Corp"
+          placeholder="e.g. The Johnson Residence"
         />
       </div>
 
@@ -124,7 +116,7 @@ export function EntryForm() {
       </button>
       <p className="text-xs text-slate-500">
         New entries are marked <span className="font-medium">Pending</span>{" "}
-        until the admin verifies and sets the commission rate.
+        until the admin verifies and sets the commission.
       </p>
     </form>
   );

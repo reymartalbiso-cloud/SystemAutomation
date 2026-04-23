@@ -1,7 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-import bcrypt from "bcryptjs";
-
-const prisma = new PrismaClient();
+import type { StoreData, Entry, User, Cycle } from "./types";
 
 function nextFriday(from: Date): Date {
   const d = new Date(from);
@@ -26,6 +23,10 @@ function addDays(d: Date, days: number): Date {
   return copy;
 }
 
+function id(prefix: string, n: number) {
+  return `${prefix}_${n.toString(36)}`;
+}
+
 type EntrySeed = {
   username: string;
   cycleIndex: number;
@@ -40,77 +41,41 @@ type EntrySeed = {
   rolledFromCycleIndex?: number;
 };
 
-async function main() {
-  console.log("Seeding database...");
+export function buildSeed(): StoreData {
+  const now = new Date().toISOString();
 
-  const adminPassword = await bcrypt.hash("admin123", 10);
-  const personnelPassword = await bcrypt.hash("personnel123", 10);
-
-  const admin = await prisma.user.upsert({
-    where: { username: "admin" },
-    update: {},
-    create: {
-      username: "admin",
-      passwordHash: adminPassword,
-      fullName: "Sarah Reyes",
-      role: "ADMIN",
-    },
-  });
-
-  const personnelData = [
-    { username: "maria", fullName: "Maria Santos" },
-    { username: "james", fullName: "James Dela Cruz" },
-    { username: "anna", fullName: "Anna Lim" },
-    { username: "paulo", fullName: "Paulo Mendoza" },
-    { username: "teresa", fullName: "Teresa Aquino" },
+  const users: User[] = [
+    { id: "u_admin", username: "admin", password: "admin123", fullName: "Sarah Reyes", role: "ADMIN" },
+    { id: "u_maria", username: "maria", password: "personnel123", fullName: "Maria Santos", role: "PERSONNEL" },
+    { id: "u_james", username: "james", password: "personnel123", fullName: "James Dela Cruz", role: "PERSONNEL" },
+    { id: "u_anna", username: "anna", password: "personnel123", fullName: "Anna Lim", role: "PERSONNEL" },
+    { id: "u_paulo", username: "paulo", password: "personnel123", fullName: "Paulo Mendoza", role: "PERSONNEL" },
+    { id: "u_teresa", username: "teresa", password: "personnel123", fullName: "Teresa Aquino", role: "PERSONNEL" },
   ];
 
-  const personnel: Record<string, { id: string; fullName: string }> = {};
-  for (const p of personnelData) {
-    const user = await prisma.user.upsert({
-      where: { username: p.username },
-      update: {},
-      create: {
-        username: p.username,
-        passwordHash: personnelPassword,
-        fullName: p.fullName,
-        role: "PERSONNEL",
-      },
-    });
-    personnel[p.username] = { id: user.id, fullName: user.fullName };
-  }
-
-  // 8 Friday cycles: 6 past, current, next
   const currentFriday = nextFriday(new Date());
   const cycleOffsets = [-6, -5, -4, -3, -2, -1, 0, 1];
   const cycleDates = cycleOffsets.map((w) => addDays(currentFriday, w * 7));
 
-  const cycles = await Promise.all(
-    cycleDates.map((endsOn) =>
-      prisma.billingCycle.upsert({
-        where: { endsOn },
-        update: {},
-        create: { endsOn, label: cycleLabel(endsOn) },
-      })
-    )
+  const cycles: Cycle[] = cycleDates.map((endsOn, i) => ({
+    id: id("c", i),
+    endsOn: endsOn.toISOString(),
+    label: cycleLabel(endsOn),
+  }));
+
+  const userByUsername: Record<string, string> = Object.fromEntries(
+    users.map((u) => [u.username, u.id])
   );
 
-  const OLDEST = 0;
-  const LAST_WEEK = 5;
-  const CURRENT = 6;
-
-  await prisma.entry.deleteMany({});
-
-  // Solar-themed sales entries
   const seeds: EntrySeed[] = [
-    // ===== 6 weeks ago =====
+    // 6 weeks ago
     { username: "maria", cycleIndex: 0, daysBeforeCycleEnd: 5, description: "8kW residential rooftop solar install", clientName: "The Johnson Residence", saleAmount: 420000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 1 },
     { username: "james", cycleIndex: 0, daysBeforeCycleEnd: 3, description: "12kW system + Tesla Powerwall", clientName: "Riverside Bakery", saleAmount: 680000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 1 },
     { username: "anna", cycleIndex: 0, daysBeforeCycleEnd: 4, description: "Solar consultation & site survey", clientName: "Hernandez Family", saleAmount: 8500, commissionRate: 0.3, status: "PAID", paidDaysAfterCycleEnd: 1 },
     { username: "paulo", cycleIndex: 0, daysBeforeCycleEnd: 6, description: "6kW rooftop + 2x battery storage", clientName: "Maple Ridge Apartments", saleAmount: 520000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 2 },
     { username: "teresa", cycleIndex: 0, daysBeforeCycleEnd: 2, description: "Net metering application + filing", clientName: "Green Valley Farm", saleAmount: 12000, commissionRate: 0.3, status: "PAID", paidDaysAfterCycleEnd: 2 },
 
-    // ===== 5 weeks ago =====
+    // 5 weeks ago
     { username: "maria", cycleIndex: 1, daysBeforeCycleEnd: 5, description: "Annual solar monitoring service", clientName: "Oak Street Medical", saleAmount: 28000, commissionRate: 0.3, status: "PAID", paidDaysAfterCycleEnd: 2 },
     { username: "maria", cycleIndex: 1, daysBeforeCycleEnd: 2, description: "5kW rooftop solar install", clientName: "Dela Rosa Household", saleAmount: 285000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 2 },
     { username: "james", cycleIndex: 1, daysBeforeCycleEnd: 4, description: "20kW commercial solar array — phase 1", clientName: "Bayview Logistics", saleAmount: 950000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 2 },
@@ -118,7 +83,7 @@ async function main() {
     { username: "paulo", cycleIndex: 1, daysBeforeCycleEnd: 5, description: "Inverter upgrade — Enphase IQ8", clientName: "The Williams Residence", saleAmount: 65000, commissionRate: 0.3, status: "PAID", paidDaysAfterCycleEnd: 3 },
     { username: "teresa", cycleIndex: 1, daysBeforeCycleEnd: 4, description: "10kW rooftop + 13.5kWh Powerwall", clientName: "Pinecrest Lodge", saleAmount: 780000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 3 },
 
-    // ===== 4 weeks ago =====
+    // 4 weeks ago
     { username: "maria", cycleIndex: 2, daysBeforeCycleEnd: 6, description: "8kW rooftop install + monitoring", clientName: "Cedar Cafe & Bakery", saleAmount: 445000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 1 },
     { username: "james", cycleIndex: 2, daysBeforeCycleEnd: 3, description: "Commercial solar — 30kW array", clientName: "Harbor Goods Warehouse", saleAmount: 1250000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 1 },
     { username: "james", cycleIndex: 2, daysBeforeCycleEnd: 1, description: "Battery backup expansion (3x Powerwall)", clientName: "Bayside Fitness Center", saleAmount: 420000, commissionRate: 0.3, status: "PAID", paidDaysAfterCycleEnd: 1 },
@@ -126,14 +91,14 @@ async function main() {
     { username: "paulo", cycleIndex: 2, daysBeforeCycleEnd: 4, description: "Annual maintenance & panel cleaning", clientName: "Mango Orchard Homes HOA", saleAmount: 18000, commissionRate: 0.3, status: "PAID", paidDaysAfterCycleEnd: 2 },
     { username: "teresa", cycleIndex: 2, daysBeforeCycleEnd: 2, description: "4kW entry-level rooftop install", clientName: "The Cortez Residence", saleAmount: 215000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 2 },
 
-    // ===== 3 weeks ago =====
+    // 3 weeks ago
     { username: "maria", cycleIndex: 3, daysBeforeCycleEnd: 4, description: "15kW rooftop + monitoring suite", clientName: "Northwind Studio", saleAmount: 820000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 3 },
     { username: "james", cycleIndex: 3, daysBeforeCycleEnd: 5, description: "50kW commercial ground-mount", clientName: "Bayview Logistics", saleAmount: 2100000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 3 },
     { username: "anna", cycleIndex: 3, daysBeforeCycleEnd: 2, description: "Net metering paperwork & utility liaison", clientName: "Greenleaf Grocers", saleAmount: 11000, commissionRate: 0.3, status: "PAID", paidDaysAfterCycleEnd: 4 },
     { username: "paulo", cycleIndex: 3, daysBeforeCycleEnd: 3, description: "6kW rooftop + Enphase microinverters", clientName: "The Gutierrez Household", saleAmount: 355000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 4 },
     { username: "teresa", cycleIndex: 3, daysBeforeCycleEnd: 6, description: "10kW rooftop w/ ground-mount extension", clientName: "Pinecrest Lodge", saleAmount: 650000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 3, notes: "Referred by Maria Santos — split credit agreed verbally." },
 
-    // ===== 2 weeks ago (one rolled from 3 weeks ago) =====
+    // 2 weeks ago
     { username: "maria", cycleIndex: 4, daysBeforeCycleEnd: 5, description: "8kW rooftop + battery backup", clientName: "Acme Retail HQ", saleAmount: 625000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 2 },
     { username: "maria", cycleIndex: 4, daysBeforeCycleEnd: 1, description: "System inspection + re-certification", clientName: "Cedar Cafe & Bakery", saleAmount: 8500, commissionRate: 0.3, status: "PAID", paidDaysAfterCycleEnd: 2 },
     { username: "james", cycleIndex: 4, daysBeforeCycleEnd: 3, description: "25kW commercial solar — phase 1", clientName: "Harbor Goods Warehouse", saleAmount: 1080000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 2 },
@@ -141,7 +106,7 @@ async function main() {
     { username: "paulo", cycleIndex: 4, daysBeforeCycleEnd: 6, description: "Panel repair — 2 units replaced under warranty", clientName: "Bloom Floral Retail", saleAmount: 7500, commissionRate: 0.3, status: "PAID", paidDaysAfterCycleEnd: 3, rolledFromCycleIndex: 3, notes: "[Rolled from 3 weeks ago] Warranty paperwork pending at time of original cycle." },
     { username: "teresa", cycleIndex: 4, daysBeforeCycleEnd: 2, description: "6kW rooftop solar — standard install", clientName: "Mango Orchard Homes HOA", saleAmount: 325000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 2 },
 
-    // ===== LAST WEEK =====
+    // last week
     { username: "maria", cycleIndex: 5, daysBeforeCycleEnd: 4, description: "Solar + battery backup — 10kW system", clientName: "Acme Retail HQ", saleAmount: 695000, commissionRate: 0.3, status: "PAID", paidDaysAfterCycleEnd: 1 },
     { username: "james", cycleIndex: 5, daysBeforeCycleEnd: 3, description: "Commercial solar — 40kW expansion", clientName: "Bayside Fitness Center", saleAmount: 1650000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 1 },
     { username: "james", cycleIndex: 5, daysBeforeCycleEnd: 6, description: "Monitoring platform setup (annual)", clientName: "Harbor Goods Warehouse", saleAmount: 32000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 2 },
@@ -149,7 +114,7 @@ async function main() {
     { username: "paulo", cycleIndex: 5, daysBeforeCycleEnd: 5, description: "8kW rooftop + microinverters", clientName: "Cedar Cafe & Bakery", saleAmount: 465000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 2 },
     { username: "teresa", cycleIndex: 5, daysBeforeCycleEnd: 3, description: "Battery backup upgrade (Powerwall 3)", clientName: "Pinecrest Lodge", saleAmount: 380000, commissionRate: 0.7, status: "PAID", paidDaysAfterCycleEnd: 1 },
 
-    // ===== CURRENT CYCLE (pending; two rolled from last week) =====
+    // current cycle
     { username: "maria", cycleIndex: 6, daysBeforeCycleEnd: 6, description: "12kW rooftop + 2x Powerwall install", clientName: "Orchid Hills Subdivision", saleAmount: 820000, commissionRate: 0.7, status: "PENDING" },
     { username: "maria", cycleIndex: 6, daysBeforeCycleEnd: 3, description: "Panel cleaning + annual inspection", clientName: "Bloom Floral Retail", saleAmount: 8500, commissionRate: 0.3, status: "PENDING" },
     { username: "maria", cycleIndex: 6, daysBeforeCycleEnd: 1, description: "Solar consultation (free) → upsell quote", clientName: "The Reyes Family", saleAmount: 7000, commissionRate: 0.3, status: "PENDING" },
@@ -169,57 +134,35 @@ async function main() {
     { username: "teresa", cycleIndex: 6, daysBeforeCycleEnd: 0, description: "Battery backup consultation", clientName: "Oak Street Medical", saleAmount: 6500, commissionRate: 0.7, status: "PENDING" },
   ];
 
-  for (const s of seeds) {
-    const user = personnel[s.username];
-    if (!user) continue;
+  const entries: Entry[] = seeds.map((s, i) => {
     const cycle = cycles[s.cycleIndex];
-    const saleDate = addDays(cycle.endsOn, -s.daysBeforeCycleEnd);
+    const cycleEnd = new Date(cycle.endsOn);
+    const saleDate = addDays(cycleEnd, -s.daysBeforeCycleEnd);
     const paidAt =
       s.status === "PAID" && s.paidDaysAfterCycleEnd !== undefined
-        ? addDays(cycle.endsOn, s.paidDaysAfterCycleEnd)
+        ? addDays(cycleEnd, s.paidDaysAfterCycleEnd).toISOString()
         : null;
     const rolledFromCycleId =
       s.rolledFromCycleIndex !== undefined
         ? cycles[s.rolledFromCycleIndex].id
         : null;
 
-    await prisma.entry.create({
-      data: {
-        userId: user.id,
-        cycleId: cycle.id,
-        saleDate,
-        description: s.description,
-        clientName: s.clientName,
-        saleAmount: s.saleAmount,
-        commissionRate: s.commissionRate,
-        status: s.status,
-        notes: s.notes ?? null,
-        paidAt,
-        rolledFromCycleId,
-      },
-    });
-  }
-
-  console.log(`Seeded:
-  - Admin:       ${admin.fullName}  (admin / admin123)
-  - Personnel:
-      ${personnel.maria.fullName}       (maria   / personnel123)
-      ${personnel.james.fullName}     (james   / personnel123)
-      ${personnel.anna.fullName}           (anna    / personnel123)
-      ${personnel.paulo.fullName}       (paulo   / personnel123)
-      ${personnel.teresa.fullName}       (teresa  / personnel123)
-  - Cycles:       ${cycles.length} (${cycleLabel(cycles[OLDEST].endsOn)}  →  ${cycleLabel(cycles[cycles.length - 1].endsOn)})
-  - Entries:      ${seeds.length}
-  - Current cycle pending: ${seeds.filter((s) => s.cycleIndex === CURRENT && s.status === "PENDING").length}
-  - Rolled-over:  ${seeds.filter((s) => s.rolledFromCycleIndex !== undefined).length}
-  - Last week:    ${seeds.filter((s) => s.cycleIndex === LAST_WEEK).length}`);
-}
-
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
+    return {
+      id: id("e", i),
+      userId: userByUsername[s.username]!,
+      cycleId: cycle.id,
+      saleDate: saleDate.toISOString(),
+      description: s.description,
+      clientName: s.clientName,
+      saleAmount: s.saleAmount,
+      commissionRate: s.commissionRate,
+      status: s.status,
+      notes: s.notes ?? null,
+      rolledFromCycleId,
+      paidAt,
+      createdAt: now,
+    };
   });
+
+  return { version: 1, users, cycles, entries };
+}

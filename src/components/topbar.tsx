@@ -2,6 +2,7 @@
 
 import { LogOut, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { signOut } from "@/lib/auth-client";
 
 type Props = {
   fullName: string;
@@ -18,10 +19,9 @@ export function Topbar({ fullName, subtitle, badge }: Props) {
     .join("")
     .toUpperCase();
 
-  async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" });
+  function handleLogout() {
+    signOut();
     router.replace("/login");
-    router.refresh();
   }
 
   return (

@@ -1,14 +1,8 @@
-import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
 import { LoginForm } from "./login-form";
 
-export default async function LoginPage() {
-  const session = await getSession();
-  if (session) redirect(session.role === "ADMIN" ? "/admin" : "/personnel");
-
+export default function LoginPage() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-50">
-      {/* Background gradient blobs */}
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute -left-32 top-0 h-96 w-96 rounded-full bg-brand-200 opacity-40 blur-3xl" />
         <div className="absolute -right-32 bottom-0 h-96 w-96 rounded-full bg-indigo-300 opacity-30 blur-3xl" />
@@ -16,7 +10,6 @@ export default async function LoginPage() {
 
       <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-6 py-12">
         <div className="grid w-full gap-10 lg:grid-cols-2 lg:gap-16">
-          {/* Left: pitch */}
           <div className="hidden flex-col justify-center lg:flex">
             <div className="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-brand-200 bg-white px-3 py-1 text-xs font-medium text-brand-700 shadow-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
@@ -42,7 +35,6 @@ export default async function LoginPage() {
             </ul>
           </div>
 
-          {/* Right: login card */}
           <div className="flex items-center">
             <div className="w-full max-w-md">
               <div className="card p-8">

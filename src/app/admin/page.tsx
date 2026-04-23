@@ -1,56 +1,86 @@
-import { requireRole } from "@/lib/auth";
-import { prisma } from "@/lib/db";
-import { getOrCreateCurrentCycle } from "@/lib/cycle";
-import { commission, formatCurrency } from "@/lib/format";
+"use client";
+
+import { useMemo } from "react";
+import { Banknote, CalendarDays, Hourglass, Users } from "lucide-react";
 import { Topbar } from "@/components/topbar";
 import { StatCard } from "@/components/stat-card";
-import {
-  Banknote,
-  CalendarDays,
-  Hourglass,
-  Users,
-} from "lucide-react";
+import { RouteGuard } from "@/components/route-guard";
+import { useStore, getOrCreateCurrentCycle } from "@/lib/store";
+import { commission, formatCurrency } from "@/lib/format";
 import { AdminConsole } from "./admin-console";
+import type { SessionUser } from "@/lib/auth-client";
 
-export const dynamic = "force-dynamic";
+export default function AdminPage() {
+  return (
+    <RouteGuard role="ADMIN">{(user) => <Content user={user} />}</RouteGuard>
+  );
+}
 
-export default async function AdminPage() {
-  const session = await requireRole("ADMIN");
-  const currentCycle = await getOrCreateCurrentCycle();
+function Content({ user }: { user: SessionUser }) {
+  const store = useStore();
 
-  const [entries, cycles, users] = await Promise.all([
-    prisma.entry.findMany({
-      include: { user: true, cycle: true },
-      orderBy: [{ saleDate: "desc" }, { createdAt: "desc" }],
-    }),
-    prisma.billingCycle.findMany({ orderBy: { endsOn: "desc" } }),
-    prisma.user.findMany({
-      where: { role: "PERSONNEL" },
-      orderBy: { fullName: "asc" },
-    }),
-  ]);
+  const currentCycle = useMemo(() => {
+    if (store.cycles.length === 0) return null;
+    return getOrCreateCurrentCycle();
+  }, [store.cycles.length]);
+
+  const userById = useMemo(
+    () => new Map(store.users.map((u) => [u.id, u])),
+    [store.users]
+  );
+  const cycleById = useMemo(
+    () => new Map(store.cycles.map((c) => [c.id, c])),
+    [store.cycles]
+  );
+
+  const personnel = useMemo(
+    () =>
+      store.users
+        .filter((u) => u.role === "PERSONNEL")
+        .sort((a, b) => a.fullName.localeCompare(b.fullName)),
+    [store.users]
+  );
+
+  const sortedEntries = useMemo(
+    () =>
+      [...store.entries].sort((a, b) => {
+        const d = b.saleDate.localeCompare(a.saleDate);
+        return d !== 0 ? d : b.createdAt.localeCompare(a.createdAt);
+      }),
+    [store.entries]
+  );
+
+  const sortedCycles = useMemo(
+    () => [...store.cycles].sort((a, b) => b.endsOn.localeCompare(a.endsOn)),
+    [store.cycles]
+  );
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const yearStart = new Date(now.getFullYear(), 0, 1);
 
-  const currentEntries = entries.filter((e) => e.cycleId === currentCycle.id);
+  const currentEntries = currentCycle
+    ? sortedEntries.filter((e) => e.cycleId === currentCycle.id)
+    : [];
+
   const pendingTotal = currentEntries
     .filter((e) => e.status === "PENDING")
     .reduce((s, e) => s + commission(e.saleAmount, e.commissionRate), 0);
 
-  const paidThisMonth = entries
-    .filter((e) => e.status === "PAID" && e.paidAt && e.paidAt >= monthStart)
+  const paidThisMonth = sortedEntries
+    .filter(
+      (e) => e.status === "PAID" && e.paidAt && new Date(e.paidAt) >= monthStart
+    )
     .reduce((s, e) => s + commission(e.saleAmount, e.commissionRate), 0);
 
-  const ytdSales = entries
-    .filter((e) => e.saleDate >= yearStart)
+  const ytdSales = sortedEntries
+    .filter((e) => new Date(e.saleDate) >= yearStart)
     .reduce((s, e) => s + e.saleAmount, 0);
 
   return (
     <div className="min-h-screen bg-slate-50">
       <Topbar
-        fullName={session.fullName}
+        fullName={user.fullName}
         subtitle="Admin workspace"
         badge="Admin"
       />
@@ -63,7 +93,7 @@ export default async function AdminPage() {
           <p className="text-sm text-slate-500">
             Current cycle:{" "}
             <span className="font-medium text-slate-700">
-              {currentCycle.label}
+              {currentCycle?.label ?? "—"}
             </span>{" "}
             · Closes Friday
           </p>
@@ -93,36 +123,45 @@ export default async function AdminPage() {
           />
           <StatCard
             label="Personnel"
-            value={String(users.length)}
+            value={String(personnel.length)}
             hint="Active sales people"
             icon={<Users className="h-5 w-5" />}
             accent="slate"
           />
         </section>
 
-        <AdminConsole
-          currentCycleId={currentCycle.id}
-          cycles={cycles.map((c) => ({
-            id: c.id,
-            label: c.label,
-            endsOn: c.endsOn.toISOString(),
-          }))}
-          users={users.map((u) => ({ id: u.id, fullName: u.fullName }))}
-          entries={entries.map((e) => ({
-            id: e.id,
-            saleDate: e.saleDate.toISOString(),
-            description: e.description,
-            clientName: e.clientName,
-            saleAmount: e.saleAmount,
-            commissionRate: e.commissionRate,
-            status: e.status,
-            notes: e.notes,
-            cycleId: e.cycleId,
-            cycleLabel: e.cycle.label,
-            user: { id: e.user.id, fullName: e.user.fullName },
-            rolled: !!e.rolledFromCycleId,
-          }))}
-        />
+        {currentCycle && (
+          <AdminConsole
+            currentCycleId={currentCycle.id}
+            cycles={sortedCycles.map((c) => ({
+              id: c.id,
+              label: c.label,
+              endsOn: c.endsOn,
+            }))}
+            users={personnel.map((u) => ({ id: u.id, fullName: u.fullName }))}
+            entries={sortedEntries.map((e) => {
+              const u = userById.get(e.userId);
+              const c = cycleById.get(e.cycleId);
+              return {
+                id: e.id,
+                saleDate: e.saleDate,
+                description: e.description,
+                clientName: e.clientName,
+                saleAmount: e.saleAmount,
+                commissionRate: e.commissionRate,
+                status: e.status,
+                notes: e.notes,
+                cycleId: e.cycleId,
+                cycleLabel: c?.label ?? "—",
+                user: {
+                  id: e.userId,
+                  fullName: u?.fullName ?? "Unknown",
+                },
+                rolled: !!e.rolledFromCycleId,
+              };
+            })}
+          />
+        )}
       </main>
     </div>
   );

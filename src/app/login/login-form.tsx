@@ -1,38 +1,35 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, LogIn } from "lucide-react";
+import { signIn, useCurrentUser } from "@/lib/auth-client";
 
 export function LoginForm() {
   const router = useRouter();
+  const currentUser = useCurrentUser();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
+  useEffect(() => {
+    if (currentUser) {
+      router.replace(currentUser.role === "ADMIN" ? "/admin" : "/personnel");
+    }
+  }, [currentUser, router]);
+
+  function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data?.error ?? "Could not sign in.");
-        setLoading(false);
-        return;
-      }
-      router.replace(data.redirect ?? "/");
-      router.refresh();
-    } catch {
-      setError("Network error. Please try again.");
+    const { user, error: err } = signIn(username, password);
+    if (err || !user) {
+      setError(err ?? "Could not sign in.");
       setLoading(false);
+      return;
     }
+    router.replace(user.role === "ADMIN" ? "/admin" : "/personnel");
   }
 
   return (

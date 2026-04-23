@@ -1,52 +1,56 @@
-# Commission Tracker — Prototype
+# Solar Commission Tracker — Prototype
 
-A clean web app replacement for the Excel-based commission workflow. Personnel
-submit sales; admins verify, set commission rate (70% or 30%), mark paid, and
-roll unpaid items to the next Friday cycle automatically.
+A clean web app replacing the Excel-based commission workflow for a solar
+sales team. Personnel submit sales; admins verify, set the commission, mark
+paid, and roll unpaid items to the next Friday cycle — with a required reason.
 
-> This is a **prototype** aimed at demonstrating the core concepts. It is
-> architected to be MVP-ready: real auth, real database, role-based views, and
-> a production-shaped data model.
+> **Prototype storage:** this build uses browser **localStorage** so there's
+> no database to set up. Data persists per browser and syncs live across tabs.
+> For multi-device production use, swap the store for a real backend
+> (see "Upgrading to a backend" below).
 
 ## Features
 
 **Personnel**
-- Username + password login
+- Username + password login (client-side)
 - Dashboard with earned / pending / monthly / YTD stats
-- Form to submit new sales (date, description, client, amount)
-- Personal entries table with search, filter by status, and cycle awareness
+- Submit new sales (date, description, client, amount)
+- Personal entries table with search, status filter, and notes
 
 **Admin**
 - Dashboard with pending / paid / YTD / personnel count stats
 - Master table across **all** personnel and cycles
-- Search across everything (person, client, description, cycle, amount)
+- Search across everything (person, client, description, notes, cycle, amount)
 - Filter by cycle, by person, by status
-- One-click toggle between 70% and 30% commission rate per entry
+- **Editable commission amount** — rate auto-recalculates from commission ÷ sale
 - Mark Paid / Pending per entry
-- Per-entry rollover to next cycle
-- Bulk "Roll unpaid → next" for an entire cycle
+- Per-entry rollover to next cycle — **reason required**, recorded in notes
+- Bulk "Roll unpaid → next" for an entire cycle, reason applied to all
 - Friday-to-Friday billing, auto-created on demand
+- **Notes column** with inline edit modal
 
-## Tech Stack
+## Tech stack
 
-- **Next.js 14** (App Router) — full-stack, Vercel-ready
-- **Prisma** + **SQLite** (local) / **PostgreSQL** (production)
-- **Tailwind CSS** — professional UI
-- **jose** JWT cookie sessions + **bcryptjs** password hashing
-- **lucide-react** for icons
+- Next.js 14 (App Router, client-rendered)
+- Tailwind CSS
+- lucide-react icons
+- **No backend**: data lives in browser localStorage
 
-## Run Locally
+## Run locally
 
 ```bash
 npm install
-npm run db:push      # create SQLite tables from schema
-npm run db:seed      # insert demo users, cycles, and entries
 npm run dev
 ```
 
-Open http://localhost:3000
+Open http://localhost:3000. On first visit, the store auto-seeds with:
 
-### Demo accounts
+- 1 admin + 5 personnel accounts
+- 8 Friday-to-Friday billing cycles (6 past, current, next)
+- 47 mock solar sales entries (residential installs, commercial arrays,
+  battery backups, consultations, inspections, and more)
+
+## Demo accounts
 
 | Role       | Username | Password         |
 |------------|----------|------------------|
@@ -54,84 +58,73 @@ Open http://localhost:3000
 | Personnel  | `maria`  | `personnel123`   |
 | Personnel  | `james`  | `personnel123`   |
 | Personnel  | `anna`   | `personnel123`   |
+| Personnel  | `paulo`  | `personnel123`   |
+| Personnel  | `teresa` | `personnel123`   |
 
-Reset with fresh data any time:
+## Resetting the demo
 
-```bash
-npm run db:reset
+Open the browser DevTools console and run:
+
+```js
+localStorage.removeItem('commission-tracker:v1');
+localStorage.removeItem('commission-tracker:session');
+location.reload();
 ```
+
+The store will rebuild with fresh seed data.
 
 ## Deploy to Vercel
 
-SQLite is only suitable for local dev — Vercel's serverless file system is
-read-only and ephemeral. For deployment, switch to Postgres (Vercel Postgres,
-Neon, or Supabase all work).
+Nothing special — no DB, no env vars:
 
-1. Create a Postgres database (Neon free tier is easiest: https://neon.tech)
-2. Change the provider in [prisma/schema.prisma](prisma/schema.prisma#L8-L11):
+1. Push to a GitHub repo (already done)
+2. Import the repo into Vercel
+3. Accept defaults; deploy
 
-   ```prisma
-   datasource db {
-     provider = "postgresql"
-     url      = env("DATABASE_URL")
-   }
-   ```
+Each visitor gets their own isolated demo in their own browser.
 
-3. Set environment variables in the Vercel project:
-   - `DATABASE_URL` — your Postgres connection string
-   - `AUTH_SECRET` — a long random string (`openssl rand -base64 32`)
+## Limitations of the localStorage build
 
-4. Push the repo to GitHub and import into Vercel. The build script will run
-   `prisma generate && prisma migrate deploy && next build`.
+- **Per-browser data**: admin on one laptop and personnel on another will
+  not see each other's entries. For a live demo, log in/out as different
+  users in the same browser.
+- **No audit trail** of who did what (all writes are local).
+- **Clearing browser data** wipes the workspace.
 
-5. After the first deploy, run the seed once from your local machine against
-   the production DB (optional):
+These are the *intended* prototype limits. See below to upgrade.
 
-   ```bash
-   DATABASE_URL="your-prod-url" npm run db:seed
-   ```
+## Upgrading to a backend (next phase)
 
-## Prototype Scope — What's Intentionally Left Out
+When you're ready to make this real:
 
-Designed to be built next — architecture already supports them:
+- Replace [`src/lib/store.ts`](src/lib/store.ts) with fetch calls to API routes.
+- Add back a Prisma + Postgres (Neon, Vercel Postgres, Supabase) layer.
+- Move auth to JWT cookies (bcrypt + jose are already familiar in this codebase).
 
-- Admin UI to create/invite personnel (users are seeded for the demo)
-- Password reset / magic-link invites
-- CSV / PDF export of reports
-- Email notifications on "paid"
-- Audit log (who marked what, when)
-- Multi-tenant support (multiple admin workspaces)
+The data model in [`src/lib/types.ts`](src/lib/types.ts) already matches a
+relational schema (User, BillingCycle, Entry).
 
-## Project Structure
+## Project structure
 
 ```
 src/
   app/
-    login/              — Login page (server) + form (client)
-    personnel/          — Personnel dashboard, entry form, table
-    admin/              — Admin dashboard, master console
-    api/
-      auth/login        — POST: sign in
-      auth/logout       — POST: sign out
-      entries           — POST: create entry
-      entries/[id]      — PATCH: update status/rate/notes · DELETE
-      entries/[id]/rollover — POST: move entry to next cycle
-      cycles/rollover-unpaid — POST: bulk roll pending entries
-  components/           — StatCard, StatusBadge, Topbar
+    login/                — Login page + form (client-side auth)
+    personnel/            — Personnel dashboard, entry form, table
+    admin/                — Admin dashboard, master console
+    layout.tsx            — Root layout (shared fonts/styles)
+    page.tsx              — Redirect based on current session
+  components/
+    modal.tsx             — Reusable modal (reason prompts, notes editor)
+    route-guard.tsx       — Client-side role gate with loading state
+    stat-card.tsx         — Dashboard stat cards
+    status-badge.tsx      — Paid/Pending badges
+    topbar.tsx            — Header with user avatar + logout
   lib/
-    auth.ts             — JWT session + bcrypt credentials
-    cycle.ts            — Friday-to-Friday cycle math
-    db.ts               — Prisma client singleton
-    format.ts           — Currency/date formatting helpers
-prisma/
-  schema.prisma         — User, BillingCycle, Entry models
-  seed.ts               — Demo users, cycles, and entries
+    auth-client.ts        — signIn / signOut / useCurrentUser
+    cn.ts                 — Tailwind className helper
+    format.ts             — Currency/date formatters
+    seed-data.ts          — 47-entry solar demo dataset
+    store.ts              — localStorage store + CRUD + rollover logic
+    types.ts              — User, Cycle, Entry, StoreData types
 ```
-
-## Data Model (summary)
-
-- **User** — `{ username, passwordHash, fullName, role: ADMIN|PERSONNEL }`
-- **BillingCycle** — `{ endsOn (unique Friday), label }`
-- **Entry** — `{ user, cycle, saleDate, description, clientName, saleAmount,
-  commissionRate (0.7 or 0.3), status: PENDING|PAID, notes, rolledFromCycleId,
-  paidAt }`
