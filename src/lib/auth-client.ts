@@ -9,14 +9,15 @@ const SESSION_EVENT = "commission-tracker:session-changed";
 
 export type SessionUser = Omit<User, "password">;
 
-function readSession(): SessionUser | null {
+// Cache the parsed session keyed by the raw string so `useSyncExternalStore`
+// sees a stable reference when nothing changed.
+let cachedRaw: string | null = null;
+let cachedSession: SessionUser | null = null;
+
+function readRaw(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as SessionUser;
-    if (!parsed?.id) return null;
-    return parsed;
+    return window.localStorage.getItem(SESSION_KEY);
   } catch {
     return null;
   }
@@ -29,6 +30,32 @@ function writeSession(user: SessionUser | null) {
     window.localStorage.removeItem(SESSION_KEY);
   }
   window.dispatchEvent(new Event(SESSION_EVENT));
+}
+
+function snapshot(): SessionUser | null {
+  const raw = readRaw();
+  if (raw === cachedRaw) return cachedSession;
+  cachedRaw = raw;
+  if (!raw) {
+    cachedSession = null;
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as SessionUser;
+    if (!parsed?.id) {
+      cachedSession = null;
+      return null;
+    }
+    cachedSession = parsed;
+    return parsed;
+  } catch {
+    cachedSession = null;
+    return null;
+  }
+}
+
+function serverSnapshot(): SessionUser | null {
+  return null;
 }
 
 /** Verify credentials and start a session. Returns the user or an error string. */
@@ -62,25 +89,7 @@ function subscribe(listener: () => void) {
   };
 }
 
-function snapshot(): SessionUser | null {
-  return readSession();
-}
-
-function serverSnapshot(): SessionUser | null {
-  return null;
-}
-
 /** Reactive current-user hook (null while unauthenticated). */
 export function useCurrentUser(): SessionUser | null {
   return useSyncExternalStore(subscribe, snapshot, serverSnapshot);
-}
-
-/** True once the client has mounted (and localStorage is safe to read). */
-export function useIsClient(): boolean {
-  const hydrated = useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false
-  );
-  return hydrated;
 }

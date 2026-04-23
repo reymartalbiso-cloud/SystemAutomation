@@ -1,11 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { CalendarClock, CheckCircle2, Hourglass, TrendingUp } from "lucide-react";
 import { Topbar } from "@/components/topbar";
 import { StatCard } from "@/components/stat-card";
 import { RouteGuard } from "@/components/route-guard";
-import { useStore, getOrCreateCurrentCycle } from "@/lib/store";
+import {
+  findCurrentCycle,
+  getOrCreateCurrentCycle,
+  useStore,
+} from "@/lib/store";
 import { commission, formatCurrency } from "@/lib/format";
 import { EntryForm } from "./entry-form";
 import { PersonnelEntriesTable } from "./entries-table";
@@ -20,11 +24,15 @@ export default function PersonnelPage() {
 function Content({ user }: { user: SessionUser }) {
   const store = useStore();
 
-  // Ensure a current cycle exists (creates one if missing)
-  const currentCycle = useMemo(() => {
-    if (store.cycles.length === 0) return null;
-    return getOrCreateCurrentCycle();
-  }, [store.cycles.length]);
+  // Ensure a current Friday cycle exists — runs in an effect so we never
+  // write to localStorage during render.
+  useEffect(() => {
+    if (store.users.length > 0) {
+      getOrCreateCurrentCycle();
+    }
+  }, [store.users.length, store.cycles.length]);
+
+  const currentCycle = useMemo(() => findCurrentCycle(store), [store]);
 
   const entries = useMemo(
     () =>

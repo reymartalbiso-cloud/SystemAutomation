@@ -7,50 +7,102 @@ import { buildSeed } from "./seed-data";
 const KEY = "commission-tracker:v1";
 const CHANGE_EVENT = "commission-tracker:changed";
 
+// Stable empty reference for SSR and for when localStorage is empty.
+const EMPTY_SNAPSHOT: StoreData = {
+  version: 1,
+  users: [],
+  cycles: [],
+  entries: [],
+};
+
+// Cache the parsed snapshot keyed by the raw string so `getSnapshot`
+// returns a stable reference when nothing changed. Without this,
+// `useSyncExternalStore` sees a new object each call and re-renders
+// infinitely.
+let cachedRaw: string | null = null;
+let cachedSnapshot: StoreData = EMPTY_SNAPSHOT;
+
 // ─── Low-level persistence ────────────────────────────────────────────────
 
-function readRaw(): StoreData | null {
+function readRaw(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as StoreData;
-    if (parsed?.version === 1) return parsed;
-    return null;
+    return window.localStorage.getItem(KEY);
   } catch {
     return null;
   }
 }
 
-function writeRaw(data: StoreData) {
-  window.localStorage.setItem(KEY, JSON.stringify(data));
-  // Notify listeners in this tab (the native `storage` event only fires
-  // in *other* tabs, so we dispatch a synthetic event for same-tab updates).
+function writeRaw(raw: string) {
+  window.localStorage.setItem(KEY, raw);
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
-/** Returns the current store, initializing with seed data if empty. */
-export function getStore(): StoreData {
-  const existing = readRaw();
-  if (existing) return existing;
-  const seeded = buildSeed();
-  writeRaw(seeded);
-  return seeded;
+function parseRaw(raw: string | null): StoreData {
+  if (!raw) return EMPTY_SNAPSHOT;
+  try {
+    const parsed = JSON.parse(raw) as StoreData;
+    if (parsed?.version === 1) return parsed;
+    return EMPTY_SNAPSHOT;
+  } catch {
+    return EMPTY_SNAPSHOT;
+  }
 }
 
-/** Atomic update — mutator receives a draft, we write it back. */
+/** Pure read — no side effects. Returns stable reference when unchanged. */
+function getSnapshot(): StoreData {
+  const raw = readRaw();
+  if (raw === cachedRaw) return cachedSnapshot;
+  cachedRaw = raw;
+  cachedSnapshot = parseRaw(raw);
+  return cachedSnapshot;
+}
+
+function getServerSnapshot(): StoreData {
+  return EMPTY_SNAPSHOT;
+}
+
+/** Return the current store (client-only). Does NOT seed — callers should
+ *  check for emptiness and let the `useStore` hook trigger seeding via
+ *  useEffect. */
+export function getStore(): StoreData {
+  return getSnapshot();
+}
+
+/**
+ * Atomic update. The mutator receives a cloned draft; if it actually
+ * changes anything, we write it back and fire the change event. No-op
+ * mutators do NOT trigger writes — important because some helpers
+ * (e.g. ensureCycle) may not mutate when the entity already exists.
+ */
 export function updateStore(mutator: (draft: StoreData) => void) {
-  const data = getStore();
-  // Clone so mutations inside the mutator don't leak until write is done
-  const draft: StoreData = JSON.parse(JSON.stringify(data));
+  if (typeof window === "undefined") return;
+  const currentRaw = readRaw();
+  const current = parseRaw(currentRaw);
+  const beforeJSON = JSON.stringify(current);
+  const draft: StoreData = JSON.parse(beforeJSON);
   mutator(draft);
-  writeRaw(draft);
+  const afterJSON = JSON.stringify(draft);
+  if (afterJSON !== beforeJSON) {
+    writeRaw(afterJSON);
+  }
+}
+
+/** Seed the store with demo data if it's empty. Idempotent. */
+function seedIfEmpty() {
+  if (typeof window === "undefined") return;
+  const raw = readRaw();
+  const parsed = parseRaw(raw);
+  if (parsed.users.length > 0) return;
+  const seeded = buildSeed();
+  writeRaw(JSON.stringify(seeded));
 }
 
 /** Wipe everything and reseed. */
 export function resetStore() {
+  if (typeof window === "undefined") return;
   const seeded = buildSeed();
-  writeRaw(seeded);
+  writeRaw(JSON.stringify(seeded));
 }
 
 // ─── Reactive hook ────────────────────────────────────────────────────────
@@ -65,23 +117,16 @@ function subscribe(listener: () => void) {
   };
 }
 
-function getSnapshot(): StoreData {
-  return getStore();
-}
-
-function getServerSnapshot(): StoreData {
-  // During SSR, return an empty snapshot; real data arrives on hydration.
-  return { version: 1, users: [], cycles: [], entries: [] };
-}
-
-/** Reactive store — rerenders whenever anything in localStorage changes. */
+/** Reactive store — rerenders whenever anything in localStorage changes.
+ *  On first mount (if empty), seeds the store with demo data. */
 export function useStore(): StoreData {
-  // useSyncExternalStore avoids hydration mismatches and handles
-  // both cross-tab and same-tab updates cleanly.
+  useEffect(() => {
+    seedIfEmpty();
+  }, []);
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-/** True once localStorage has been read on the client. */
+/** True once the client has mounted. */
 export function useHydrated(): boolean {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
@@ -94,7 +139,7 @@ function uid(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
 }
 
-function nextFridayFromToday(): Date {
+export function nextFridayFromToday(): Date {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   const day = d.getDay();
@@ -134,22 +179,25 @@ function ensureCycle(draft: StoreData, endsOn: Date): Cycle {
   return cycle;
 }
 
+/** Returns the current Friday cycle from the given store data without
+ *  any writes. Use this from render code. */
+export function findCurrentCycle(store: StoreData): Cycle | null {
+  const iso = nextFridayFromToday().toISOString();
+  return store.cycles.find((c) => c.endsOn === iso) ?? null;
+}
+
+/** Ensure the current Friday cycle exists. Call from effects / handlers. */
 export function getOrCreateCurrentCycle(): Cycle {
   const endsOn = nextFridayFromToday();
   let cycle!: Cycle;
   updateStore((draft) => {
     cycle = ensureCycle(draft, endsOn);
   });
-  return cycle;
-}
-
-export function getOrCreateNextCycleAfter(endsOnISO: string): Cycle {
-  const next = new Date(endsOnISO);
-  next.setDate(next.getDate() + 7);
-  let cycle!: Cycle;
-  updateStore((draft) => {
-    cycle = ensureCycle(draft, next);
-  });
+  // If updateStore didn't write (cycle existed), read from current snapshot
+  if (!cycle) {
+    const store = getStore();
+    cycle = store.cycles.find((c) => c.endsOn === endsOn.toISOString())!;
+  }
   return cycle;
 }
 

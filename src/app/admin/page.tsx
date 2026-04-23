@@ -1,11 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Banknote, CalendarDays, Hourglass, Users } from "lucide-react";
 import { Topbar } from "@/components/topbar";
 import { StatCard } from "@/components/stat-card";
 import { RouteGuard } from "@/components/route-guard";
-import { useStore, getOrCreateCurrentCycle } from "@/lib/store";
+import {
+  findCurrentCycle,
+  getOrCreateCurrentCycle,
+  useStore,
+} from "@/lib/store";
 import { commission, formatCurrency } from "@/lib/format";
 import { AdminConsole } from "./admin-console";
 import type { SessionUser } from "@/lib/auth-client";
@@ -19,10 +23,13 @@ export default function AdminPage() {
 function Content({ user }: { user: SessionUser }) {
   const store = useStore();
 
-  const currentCycle = useMemo(() => {
-    if (store.cycles.length === 0) return null;
-    return getOrCreateCurrentCycle();
-  }, [store.cycles.length]);
+  useEffect(() => {
+    if (store.users.length > 0) {
+      getOrCreateCurrentCycle();
+    }
+  }, [store.users.length, store.cycles.length]);
+
+  const currentCycle = useMemo(() => findCurrentCycle(store), [store]);
 
   const userById = useMemo(
     () => new Map(store.users.map((u) => [u.id, u])),
