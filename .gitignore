@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+.env
+.env.local
+*.db
+*.db-journal
+prisma/migrations/dev.db*
+.DS_Store
+.vercel
+.claude/
