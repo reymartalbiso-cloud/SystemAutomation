@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { getStore } from "./store";
+import { getStore, seedIfEmpty } from "./store";
 import type { User } from "./types";
 
 const SESSION_KEY = "commission-tracker:session";
@@ -63,6 +63,9 @@ export function signIn(
   username: string,
   password: string
 ): { user: SessionUser | null; error: string | null } {
+  // Ensure the demo store exists before reading — on a fresh browser the
+  // user may land directly on /login which doesn't call useStore().
+  seedIfEmpty();
   const store = getStore();
   const u = store.users.find(
     (x) => x.username.toLowerCase() === username.toLowerCase().trim()

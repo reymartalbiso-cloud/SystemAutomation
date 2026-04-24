@@ -89,7 +89,7 @@ export function updateStore(mutator: (draft: StoreData) => void) {
 }
 
 /** Seed the store with demo data if it's empty. Idempotent. */
-function seedIfEmpty() {
+export function seedIfEmpty() {
   if (typeof window === "undefined") return;
   const raw = readRaw();
   const parsed = parseRaw(raw);

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Loader2, LogIn } from "lucide-react";
 import { signIn, useCurrentUser } from "@/lib/auth-client";
+import { seedIfEmpty } from "@/lib/store";
 
 export function LoginForm() {
   const router = useRouter();
@@ -12,6 +13,11 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Make sure the demo store is seeded as soon as the login page opens.
+  useEffect(() => {
+    seedIfEmpty();
+  }, []);
 
   useEffect(() => {
     if (currentUser) {
