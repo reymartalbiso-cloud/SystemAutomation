@@ -3,6 +3,7 @@
 import { LogOut, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { signOut } from "@/lib/auth-client";
+import { StorageBadge } from "@/components/storage-badge";
 
 type Props = {
   fullName: string;
@@ -46,6 +47,7 @@ export function Topbar({ fullName, subtitle, badge }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <StorageBadge />
           <div className="hidden text-right sm:block">
             <div className="text-sm font-medium text-slate-900">{fullName}</div>
           </div>

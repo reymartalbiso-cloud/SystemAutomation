@@ -1,4 +1,27 @@
-import type { StoreData, Entry, User, Cycle } from "./types";
+import type { StoreData, Entry, User, Cycle, Attachment } from "./types";
+
+// A 1×1 transparent PNG so the demo "attachment" doesn't bloat the seed.
+const TINY_PNG_DATAURL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+const SAMPLE_PDF_DATAURL =
+  "data:application/pdf;base64,JVBERi0xLjEKJcKlwrHDqwoxIDAgb2JqCiAgPDwgL1R5cGUgL0NhdGFsb2cKICAgICAvUGFnZXMgMiAwIFIKICA+PgplbmRvYmoKMiAwIG9iagogIDw8IC9UeXBlIC9QYWdlcwogICAgIC9LaWRzIFszIDAgUl0KICAgICAvQ291bnQgMQogICAgIC9NZWRpYUJveCBbMCAwIDMwMCAxNDRdCiAgPj4KZW5kb2JqCjMgMCBvYmoKICA8PCAgL1R5cGUgL1BhZ2UKICAgICAgL1BhcmVudCAyIDAgUgogICAgICAvUmVzb3VyY2VzCiAgICAgICA8PCAvRm9udAogICAgICAgICAgIDw8IC9GMQogICAgICAgICAgICAgICA8PCAvVHlwZSAvRm9udAogICAgICAgICAgICAgICAgICAvU3VidHlwZSAvVHlwZTEKICAgICAgICAgICAgICAgICAgL0Jhc2VGb250IC9UaW1lcy1Sb21hbgogICAgICAgICAgICAgICA+PgogICAgICAgICAgID4+CiAgICAgICA+PgogICAgICAvQ29udGVudHMgNCAwIFIKICA+PgplbmRvYmoKNCAwIG9iagogIDw8IC9MZW5ndGggNTUgPj4Kc3RyZWFtCiAgQlQKICAgIC9GMSAxOCBUZgogICAgMCAwIFRkCiAgICAoSGVsbG8gV29ybGQpIFRqCiAgRVQKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTggMDAwMDAgbiAKMDAwMDAwMDA3NyAwMDAwMCBuIAowMDAwMDAwMTc4IDAwMDAwIG4gCjAwMDAwMDA0NTcgMDAwMDAgbiAKdHJhaWxlcgogIDw8ICAvUm9vdCAxIDAgUgogICAgICAvU2l6ZSA1CiAgPj4Kc3RhcnR4cmVmCjU2NQolJUVPRgo=";
+
+function makeSeedAttachment(
+  name: string,
+  type: "image/png" | "application/pdf",
+  uploadedAt: string
+): Attachment {
+  const dataUrl = type === "image/png" ? TINY_PNG_DATAURL : SAMPLE_PDF_DATAURL;
+  return {
+    id: `a_${name.replace(/\W+/g, "_").toLowerCase()}`,
+    name,
+    type,
+    size: Math.floor((dataUrl.length * 3) / 4),
+    dataUrl,
+    uploadedAt,
+  };
+}
 
 function nextFriday(from: Date): Date {
   const d = new Date(from);
@@ -45,12 +68,12 @@ export function buildSeed(): StoreData {
   const now = new Date().toISOString();
 
   const users: User[] = [
-    { id: "u_admin", username: "admin", password: "admin123", fullName: "Sarah Reyes", role: "ADMIN" },
-    { id: "u_maria", username: "maria", password: "personnel123", fullName: "Maria Santos", role: "PERSONNEL" },
-    { id: "u_james", username: "james", password: "personnel123", fullName: "James Dela Cruz", role: "PERSONNEL" },
-    { id: "u_anna", username: "anna", password: "personnel123", fullName: "Anna Lim", role: "PERSONNEL" },
-    { id: "u_paulo", username: "paulo", password: "personnel123", fullName: "Paulo Mendoza", role: "PERSONNEL" },
-    { id: "u_teresa", username: "teresa", password: "personnel123", fullName: "Teresa Aquino", role: "PERSONNEL" },
+    { id: "u_admin", username: "admin", password: "admin123", fullName: "Sarah Reyes", role: "ADMIN", active: true, createdAt: now },
+    { id: "u_maria", username: "maria", password: "personnel123", fullName: "Maria Santos", role: "PERSONNEL", active: true, createdAt: now },
+    { id: "u_james", username: "james", password: "personnel123", fullName: "James Dela Cruz", role: "PERSONNEL", active: true, createdAt: now },
+    { id: "u_anna", username: "anna", password: "personnel123", fullName: "Anna Lim", role: "PERSONNEL", active: true, createdAt: now },
+    { id: "u_paulo", username: "paulo", password: "personnel123", fullName: "Paulo Mendoza", role: "PERSONNEL", active: true, createdAt: now },
+    { id: "u_teresa", username: "teresa", password: "personnel123", fullName: "Teresa Aquino", role: "PERSONNEL", active: true, createdAt: now },
   ];
 
   const currentFriday = nextFriday(new Date());
@@ -147,6 +170,23 @@ export function buildSeed(): StoreData {
         ? cycles[s.rolledFromCycleIndex].id
         : null;
 
+    // Sprinkle a couple of demo attachments so the feature isn't empty.
+    const attachments: Attachment[] = [];
+    if (i === 0) {
+      attachments.push(
+        makeSeedAttachment("site-photo-rooftop.png", "image/png", saleDate.toISOString()),
+        makeSeedAttachment("signed-quote.pdf", "application/pdf", saleDate.toISOString()),
+      );
+    } else if (i === 3) {
+      attachments.push(
+        makeSeedAttachment("battery-bay-layout.png", "image/png", saleDate.toISOString()),
+      );
+    } else if (s.cycleIndex === 6 && s.username === "james" && s.saleAmount > 1_000_000) {
+      attachments.push(
+        makeSeedAttachment("commercial-proposal.pdf", "application/pdf", saleDate.toISOString()),
+      );
+    }
+
     return {
       id: id("e", i),
       userId: userByUsername[s.username]!,
@@ -158,6 +198,7 @@ export function buildSeed(): StoreData {
       commissionRate: s.commissionRate,
       status: s.status,
       notes: s.notes ?? null,
+      attachments,
       rolledFromCycleId,
       paidAt,
       createdAt: now,

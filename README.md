@@ -15,9 +15,10 @@ paid, and roll unpaid items to the next Friday cycle — with a required reason.
 - Username + password login (client-side)
 - Dashboard with earned / pending / monthly / YTD stats
 - Submit new sales (date, description, client, amount)
-- Personal entries table with search, status filter, and notes
+- **Attach files (images / PDFs)** to a sale — drag-drop or browse
+- Personal entries table with search, status filter, notes, and attachment previews
 
-**Admin**
+**Admin — Entries tab**
 - Dashboard with pending / paid / YTD / personnel count stats
 - Master table across **all** personnel and cycles
 - Search across everything (person, client, description, notes, cycle, amount)
@@ -28,6 +29,24 @@ paid, and roll unpaid items to the next Friday cycle — with a required reason.
 - Bulk "Roll unpaid → next" for an entire cycle, reason applied to all
 - Friday-to-Friday billing, auto-created on demand
 - **Notes column** with inline edit modal
+- **Attachment viewer** — preview images and PDFs inline
+
+**Admin — Reports tab**
+- 8-cycle bar chart (gross sales + commissions side by side)
+- Personnel leaderboard ranked by paid commissions this month
+- Workflow status breakdown with progress bar
+
+**Admin — Personnel tab**
+- Add new personnel accounts with credentials
+- Edit name / reset password
+- Activate / deactivate accounts
+- Per-personnel YTD sales, YTD earned, total entries, pending count
+
+**System polish**
+- Toast notifications for every action (no more `alert()`)
+- Live storage-usage chip in the header
+- Cross-tab sync — change in one tab updates other tabs instantly
+- Hash-routed admin tabs (`#entries`, `#reports`, `#personnel`)
 
 ## Tech stack
 
@@ -88,10 +107,13 @@ Each visitor gets their own isolated demo in their own browser.
 - **Per-browser data**: admin on one laptop and personnel on another will
   not see each other's entries. For a live demo, log in/out as different
   users in the same browser.
+- **5 MB total quota** (browser-enforced). Attachments are limited to
+  1 MB each, max 3 per entry. The header chip shows live usage.
 - **No audit trail** of who did what (all writes are local).
 - **Clearing browser data** wipes the workspace.
 
-These are the *intended* prototype limits. See below to upgrade.
+These are *intended* prototype limits. See [SCALABILITY.md](SCALABILITY.md)
+for the full breakdown and the production upgrade plan.
 
 ## Upgrading to a backend (next phase)
 

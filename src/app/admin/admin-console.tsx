@@ -13,13 +13,18 @@ import {
 } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { Modal } from "@/components/modal";
+import { AttachmentChip } from "@/components/attachment-uploader";
+import { AttachmentViewer } from "@/components/attachment-viewer";
+import { useToast } from "@/components/toast";
 import { commission, formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import {
   bulkRolloverCycle as storeBulkRollover,
   rolloverEntry as storeRollover,
   updateEntry as storeUpdateEntry,
+  StoreQuotaError,
 } from "@/lib/store";
+import type { Attachment } from "@/lib/types";
 
 type Entry = {
   id: string;
@@ -30,6 +35,7 @@ type Entry = {
   commissionRate: number;
   status: string;
   notes: string | null;
+  attachments: Attachment[];
   cycleId: string;
   cycleLabel: string;
   user: { id: string; fullName: string };
@@ -47,7 +53,9 @@ type Props = {
 };
 
 export function AdminConsole({ currentCycleId, cycles, users, entries }: Props) {
+  const toast = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [viewerEntry, setViewerEntry] = useState<Entry | null>(null);
   const [query, setQuery] = useState("");
   const [cycleFilter, setCycleFilter] = useState<string>(currentCycleId);
   const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING" | "PAID">(
@@ -98,32 +106,65 @@ export function AdminConsole({ currentCycleId, cycles, users, entries }: Props) 
     }
   ) {
     setBusyId(id);
-    storeUpdateEntry(id, body);
-    // brief busy state so users see the update registered
-    setTimeout(() => setBusyId(null), 120);
+    try {
+      storeUpdateEntry(id, body);
+    } catch (err) {
+      if (err instanceof StoreQuotaError) {
+        toast.error("Storage full", err.message);
+      } else {
+        toast.error("Update failed", "Please try again.");
+      }
+    } finally {
+      setTimeout(() => setBusyId(null), 120);
+    }
   }
 
   async function submitRollover(reason: string) {
     if (!rolloverEntry) return;
     setBusyId(rolloverEntry.id);
-    const err = storeRollover(rolloverEntry.id, reason);
-    setBusyId(null);
-    if (err) {
-      alert(err);
-      return;
+    try {
+      const err = storeRollover(rolloverEntry.id, reason);
+      if (err) {
+        toast.error("Could not roll over", err);
+        return;
+      }
+      setRolloverEntry(null);
+      toast.success("Moved to next cycle", "Reason added to the entry's notes.");
+    } catch (err) {
+      if (err instanceof StoreQuotaError) {
+        toast.error("Storage full", err.message);
+      } else {
+        toast.error("Rollover failed", "Please try again.");
+      }
+    } finally {
+      setBusyId(null);
     }
-    setRolloverEntry(null);
   }
 
   async function submitBulkRollover(reason: string) {
     if (!bulkRolloverCycle) return;
-    const { movedCount, error } = storeBulkRollover(bulkRolloverCycle.id, reason);
-    if (error) {
-      alert(error);
-      return;
+    try {
+      const { movedCount, error } = storeBulkRollover(
+        bulkRolloverCycle.id,
+        reason
+      );
+      if (error) {
+        toast.error("Could not close cycle", error);
+        return;
+      }
+      const closingLabel = bulkRolloverCycle.label;
+      setBulkRolloverCycle(null);
+      toast.success(
+        `Moved ${movedCount} ${movedCount === 1 ? "entry" : "entries"}`,
+        `From ${closingLabel} to the next cycle.`
+      );
+    } catch (err) {
+      if (err instanceof StoreQuotaError) {
+        toast.error("Storage full", err.message);
+      } else {
+        toast.error("Bulk rollover failed", "Please try again.");
+      }
     }
-    setBulkRolloverCycle(null);
-    alert(`Moved ${movedCount} pending entries to the next cycle.`);
   }
 
   return (
@@ -262,11 +303,19 @@ export function AdminConsole({ currentCycleId, cycles, users, entries }: Props) 
                       </div>
                     </td>
                     <td>
-                      <div className="font-medium text-slate-900 line-clamp-2">
-                        {e.description}
-                      </div>
-                      <div className="text-xs text-slate-500 truncate">
-                        {e.clientName ?? "—"}
+                      <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-slate-900 line-clamp-2">
+                            {e.description}
+                          </div>
+                          <div className="text-xs text-slate-500 truncate">
+                            {e.clientName ?? "—"}
+                          </div>
+                        </div>
+                        <AttachmentChip
+                          count={e.attachments.length}
+                          onClick={() => setViewerEntry(e)}
+                        />
                       </div>
                     </td>
                     <td>
@@ -384,6 +433,16 @@ export function AdminConsole({ currentCycleId, cycles, users, entries }: Props) 
           await patchEntry(notesEntry.id, { notes: newNotes });
           setNotesEntry(null);
         }}
+      />
+      <AttachmentViewer
+        open={!!viewerEntry}
+        onClose={() => setViewerEntry(null)}
+        title={
+          viewerEntry
+            ? `${viewerEntry.user.fullName} · ${viewerEntry.description}`
+            : ""
+        }
+        attachments={viewerEntry?.attachments ?? []}
       />
     </section>
   );

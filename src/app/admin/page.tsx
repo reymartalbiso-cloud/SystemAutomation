@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { Banknote, CalendarDays, Hourglass, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  BarChart3,
+  Banknote,
+  CalendarDays,
+  Hourglass,
+  LayoutGrid,
+  Users,
+} from "lucide-react";
 import { Topbar } from "@/components/topbar";
 import { StatCard } from "@/components/stat-card";
 import { RouteGuard } from "@/components/route-guard";
+import { TabNav, type Tab } from "@/components/tab-nav";
 import {
   findCurrentCycle,
   getOrCreateCurrentCycle,
@@ -12,7 +20,11 @@ import {
 } from "@/lib/store";
 import { commission, formatCurrency } from "@/lib/format";
 import { AdminConsole } from "./admin-console";
+import { ReportsTab } from "./reports-tab";
+import { PersonnelTab } from "./personnel-tab";
 import type { SessionUser } from "@/lib/auth-client";
+
+type TabId = "entries" | "reports" | "personnel";
 
 export default function AdminPage() {
   return (
@@ -22,6 +34,30 @@ export default function AdminPage() {
 
 function Content({ user }: { user: SessionUser }) {
   const store = useStore();
+  const [activeTab, setActiveTab] = useState<TabId>("entries");
+
+  // Sync tab state with the URL hash so deep-linking + back button work.
+  useEffect(() => {
+    const fromHash = (window.location.hash.replace("#", "") as TabId) || "entries";
+    if (["entries", "reports", "personnel"].includes(fromHash)) {
+      setActiveTab(fromHash);
+    }
+    function onHashChange() {
+      const next = (window.location.hash.replace("#", "") as TabId) || "entries";
+      if (["entries", "reports", "personnel"].includes(next)) {
+        setActiveTab(next);
+      }
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  function changeTab(id: TabId) {
+    setActiveTab(id);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `#${id}`);
+    }
+  }
 
   useEffect(() => {
     if (store.users.length > 0) {
@@ -31,6 +67,14 @@ function Content({ user }: { user: SessionUser }) {
 
   const currentCycle = useMemo(() => findCurrentCycle(store), [store]);
 
+  const personnel = useMemo(
+    () =>
+      store.users
+        .filter((u) => u.role === "PERSONNEL")
+        .sort((a, b) => a.fullName.localeCompare(b.fullName)),
+    [store.users]
+  );
+
   const userById = useMemo(
     () => new Map(store.users.map((u) => [u.id, u])),
     [store.users]
@@ -38,14 +82,6 @@ function Content({ user }: { user: SessionUser }) {
   const cycleById = useMemo(
     () => new Map(store.cycles.map((c) => [c.id, c])),
     [store.cycles]
-  );
-
-  const personnel = useMemo(
-    () =>
-      store.users
-        .filter((u) => u.role === "PERSONNEL")
-        .sort((a, b) => a.fullName.localeCompare(b.fullName)),
-    [store.users]
   );
 
   const sortedEntries = useMemo(
@@ -63,8 +99,8 @@ function Content({ user }: { user: SessionUser }) {
   );
 
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const yearStart = new Date(now.getFullYear(), 0, 1).toISOString();
 
   const currentEntries = currentCycle
     ? sortedEntries.filter((e) => e.cycleId === currentCycle.id)
@@ -75,14 +111,23 @@ function Content({ user }: { user: SessionUser }) {
     .reduce((s, e) => s + commission(e.saleAmount, e.commissionRate), 0);
 
   const paidThisMonth = sortedEntries
-    .filter(
-      (e) => e.status === "PAID" && e.paidAt && new Date(e.paidAt) >= monthStart
-    )
+    .filter((e) => e.status === "PAID" && e.paidAt && e.paidAt >= monthStart)
     .reduce((s, e) => s + commission(e.saleAmount, e.commissionRate), 0);
 
   const ytdSales = sortedEntries
-    .filter((e) => new Date(e.saleDate) >= yearStart)
+    .filter((e) => e.saleDate >= yearStart)
     .reduce((s, e) => s + e.saleAmount, 0);
+
+  const tabs: Tab<TabId>[] = [
+    { id: "entries", label: "Entries", icon: <LayoutGrid className="h-4 w-4" /> },
+    { id: "reports", label: "Reports", icon: <BarChart3 className="h-4 w-4" /> },
+    {
+      id: "personnel",
+      label: "Personnel",
+      icon: <Users className="h-4 w-4" />,
+      count: personnel.length,
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -92,7 +137,7 @@ function Content({ user }: { user: SessionUser }) {
         badge="Admin"
       />
 
-      <main className="mx-auto max-w-7xl px-6 py-8 space-y-8">
+      <main className="mx-auto max-w-7xl px-6 py-8 space-y-6">
         <section>
           <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
             Commissions overview
@@ -131,13 +176,17 @@ function Content({ user }: { user: SessionUser }) {
           <StatCard
             label="Personnel"
             value={String(personnel.length)}
-            hint="Active sales people"
+            hint={`${personnel.filter((p) => p.active).length} active`}
             icon={<Users className="h-5 w-5" />}
             accent="slate"
           />
         </section>
 
-        {currentCycle && (
+        <section>
+          <TabNav tabs={tabs} active={activeTab} onChange={changeTab} />
+        </section>
+
+        {activeTab === "entries" && currentCycle && (
           <AdminConsole
             currentCycleId={currentCycle.id}
             cycles={sortedCycles.map((c) => ({
@@ -158,6 +207,7 @@ function Content({ user }: { user: SessionUser }) {
                 commissionRate: e.commissionRate,
                 status: e.status,
                 notes: e.notes,
+                attachments: e.attachments,
                 cycleId: e.cycleId,
                 cycleLabel: c?.label ?? "—",
                 user: {
@@ -168,6 +218,18 @@ function Content({ user }: { user: SessionUser }) {
               };
             })}
           />
+        )}
+
+        {activeTab === "reports" && (
+          <ReportsTab
+            cycles={sortedCycles}
+            entries={sortedEntries}
+            users={store.users}
+          />
+        )}
+
+        {activeTab === "personnel" && (
+          <PersonnelTab users={store.users} entries={sortedEntries} />
         )}
       </main>
     </div>

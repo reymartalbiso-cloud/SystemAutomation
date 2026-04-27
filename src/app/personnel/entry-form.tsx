@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { Loader2, Plus } from "lucide-react";
-import { createEntry } from "@/lib/store";
+import { createEntry, StoreQuotaError } from "@/lib/store";
+import { AttachmentUploader } from "@/components/attachment-uploader";
+import { useToast } from "@/components/toast";
+import type { Attachment } from "@/lib/types";
 
 export function EntryForm({ userId }: { userId: string }) {
   const today = new Date().toISOString().slice(0, 10);
@@ -10,8 +13,18 @@ export function EntryForm({ userId }: { userId: string }) {
   const [description, setDescription] = useState("");
   const [clientName, setClientName] = useState("");
   const [saleAmount, setSaleAmount] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const toast = useToast();
+
+  function reset() {
+    setDescription("");
+    setClientName("");
+    setSaleAmount("");
+    setSaleDate(today);
+    setAttachments([]);
+  }
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -22,20 +35,32 @@ export function EntryForm({ userId }: { userId: string }) {
       return;
     }
     setLoading(true);
-    // tiny artificial delay so the spinner is visible; feels more real
     setTimeout(() => {
-      createEntry({
-        userId,
-        saleDate,
-        description,
-        clientName: clientName || null,
-        saleAmount: amount,
-      });
-      setDescription("");
-      setClientName("");
-      setSaleAmount("");
-      setSaleDate(today);
-      setLoading(false);
+      try {
+        createEntry({
+          userId,
+          saleDate,
+          description,
+          clientName: clientName || null,
+          saleAmount: amount,
+          attachments,
+        });
+        toast.success(
+          "Sale submitted",
+          attachments.length > 0
+            ? `Awaiting verification · ${attachments.length} file${attachments.length === 1 ? "" : "s"} attached`
+            : "Awaiting verification"
+        );
+        reset();
+      } catch (err) {
+        if (err instanceof StoreQuotaError) {
+          toast.error("Storage full", err.message);
+        } else {
+          toast.error("Could not save", "Please try again.");
+        }
+      } finally {
+        setLoading(false);
+      }
     }, 150);
   }
 
@@ -97,6 +122,15 @@ export function EntryForm({ userId }: { userId: string }) {
           value={clientName}
           onChange={(e) => setClientName(e.target.value)}
           placeholder="e.g. The Johnson Residence"
+        />
+      </div>
+
+      <div>
+        <label className="label">Attachments (optional)</label>
+        <AttachmentUploader
+          attachments={attachments}
+          onChange={setAttachments}
+          disabled={loading}
         />
       </div>
 

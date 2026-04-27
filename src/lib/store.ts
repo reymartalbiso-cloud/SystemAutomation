@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { Cycle, Entry, StoreData, User } from "./types";
+import type { Attachment, Cycle, Entry, StoreData, User } from "./types";
 import { buildSeed } from "./seed-data";
 
 const KEY = "commission-tracker:v1";
 const CHANGE_EVENT = "commission-tracker:changed";
+
+// ─── Limits (prototype) ───────────────────────────────────────────────────
+// localStorage hard cap is ~5MB; keep a margin for the session key + headroom.
+export const MAX_ATTACHMENT_BYTES = 1_000_000; // 1 MB per file (≈1.4 MB base64)
+export const MAX_ATTACHMENTS_PER_ENTRY = 3;
+export const STORE_QUOTA_BYTES = 4_500_000; // soft cap before we refuse writes
+export const STORE_WARN_BYTES = 3_500_000; // surface a warning past this
 
 // Stable empty reference for SSR and for when localStorage is empty.
 const EMPTY_SNAPSHOT: StoreData = {
@@ -42,11 +49,49 @@ function parseRaw(raw: string | null): StoreData {
   if (!raw) return EMPTY_SNAPSHOT;
   try {
     const parsed = JSON.parse(raw) as StoreData;
-    if (parsed?.version === 1) return parsed;
+    if (parsed?.version === 1) return migrate(parsed);
     return EMPTY_SNAPSHOT;
   } catch {
     return EMPTY_SNAPSHOT;
   }
+}
+
+/** Backfill missing fields when an older store schema is loaded. Cheap and
+ *  idempotent, runs on every read but only allocates when something is
+ *  actually missing. */
+function migrate(data: StoreData): StoreData {
+  let mutated = false;
+  for (const u of data.users) {
+    if (u.active === undefined) {
+      u.active = true;
+      mutated = true;
+    }
+    if (!u.createdAt) {
+      u.createdAt = new Date(0).toISOString();
+      mutated = true;
+    }
+  }
+  for (const e of data.entries) {
+    if (!Array.isArray(e.attachments)) {
+      e.attachments = [];
+      mutated = true;
+    }
+  }
+  if (mutated && typeof window !== "undefined") {
+    // Persist quietly — don't fire a change event from inside a parse.
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify(data));
+    } catch {
+      /* quota errors handled elsewhere */
+    }
+  }
+  return data;
+}
+
+/** Approximate current store size in bytes (UTF-16 in localStorage = 2 bytes/char). */
+export function estimateStoreSize(): number {
+  const raw = readRaw();
+  return raw ? raw.length * 2 : 0;
 }
 
 /** Pure read — no side effects. Returns stable reference when unchanged. */
@@ -69,11 +114,22 @@ export function getStore(): StoreData {
   return getSnapshot();
 }
 
+export class StoreQuotaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StoreQuotaError";
+  }
+}
+
 /**
  * Atomic update. The mutator receives a cloned draft; if it actually
  * changes anything, we write it back and fire the change event. No-op
  * mutators do NOT trigger writes — important because some helpers
  * (e.g. ensureCycle) may not mutate when the entity already exists.
+ *
+ * Throws StoreQuotaError if the resulting store would exceed the soft
+ * quota OR if localStorage refuses the write (the browser's hard cap).
+ * The original data is left untouched on failure.
  */
 export function updateStore(mutator: (draft: StoreData) => void) {
   if (typeof window === "undefined") return;
@@ -83,8 +139,20 @@ export function updateStore(mutator: (draft: StoreData) => void) {
   const draft: StoreData = JSON.parse(beforeJSON);
   mutator(draft);
   const afterJSON = JSON.stringify(draft);
-  if (afterJSON !== beforeJSON) {
+  if (afterJSON === beforeJSON) return;
+
+  if (afterJSON.length * 2 > STORE_QUOTA_BYTES) {
+    throw new StoreQuotaError(
+      "Storage quota exceeded. Remove old attachments to make room, or upgrade to a real backend for production."
+    );
+  }
+  try {
     writeRaw(afterJSON);
+  } catch (err) {
+    // Hard cap — browser refused
+    throw new StoreQuotaError(
+      "The browser's localStorage is full. This is a prototype-only limit; production storage would not have it."
+    );
   }
 }
 
@@ -209,6 +277,7 @@ export function createEntry(input: {
   description: string;
   clientName: string | null;
   saleAmount: number;
+  attachments?: Attachment[];
 }): Entry {
   const cycle = getOrCreateCurrentCycle();
   const now = new Date().toISOString();
@@ -223,6 +292,7 @@ export function createEntry(input: {
     commissionRate: 0.7,
     status: "PENDING",
     notes: null,
+    attachments: input.attachments?.slice(0, MAX_ATTACHMENTS_PER_ENTRY) ?? [],
     rolledFromCycleId: null,
     paidAt: null,
     createdAt: now,
@@ -231,6 +301,30 @@ export function createEntry(input: {
     draft.entries.push(entry);
   });
   return entry;
+}
+
+export function addAttachmentsToEntry(
+  entryId: string,
+  attachments: Attachment[]
+) {
+  updateStore((draft) => {
+    const entry = draft.entries.find((e) => e.id === entryId);
+    if (!entry) return;
+    const room = MAX_ATTACHMENTS_PER_ENTRY - entry.attachments.length;
+    if (room <= 0) return;
+    entry.attachments.push(...attachments.slice(0, room));
+  });
+}
+
+export function removeAttachmentFromEntry(
+  entryId: string,
+  attachmentId: string
+) {
+  updateStore((draft) => {
+    const entry = draft.entries.find((e) => e.id === entryId);
+    if (!entry) return;
+    entry.attachments = entry.attachments.filter((a) => a.id !== attachmentId);
+  });
 }
 
 export function updateEntry(
@@ -269,6 +363,60 @@ export function updateEntry(
 export function deleteEntry(id: string) {
   updateStore((draft) => {
     draft.entries = draft.entries.filter((e) => e.id !== id);
+  });
+}
+
+// ─── User CRUD (admin) ────────────────────────────────────────────────────
+
+export function createUser(input: {
+  username: string;
+  password: string;
+  fullName: string;
+  role: "ADMIN" | "PERSONNEL";
+}): { user: User | null; error: string | null } {
+  const username = input.username.trim().toLowerCase();
+  const fullName = input.fullName.trim();
+  const password = input.password.trim();
+  if (!username || !fullName || !password) {
+    return { user: null, error: "All fields are required." };
+  }
+  const store = getStore();
+  if (store.users.some((u) => u.username.toLowerCase() === username)) {
+    return { user: null, error: `Username "${username}" is already taken.` };
+  }
+  const user: User = {
+    id: uid("u"),
+    username,
+    password,
+    fullName,
+    role: input.role,
+    active: true,
+    createdAt: new Date().toISOString(),
+  };
+  updateStore((draft) => {
+    draft.users.push(user);
+  });
+  return { user, error: null };
+}
+
+export function updateUser(
+  id: string,
+  patch: { fullName?: string; password?: string; active?: boolean }
+) {
+  updateStore((draft) => {
+    const user = draft.users.find((u) => u.id === id);
+    if (!user) return;
+    if (patch.fullName !== undefined) {
+      const trimmed = patch.fullName.trim();
+      if (trimmed) user.fullName = trimmed;
+    }
+    if (patch.password !== undefined) {
+      const trimmed = patch.password.trim();
+      if (trimmed) user.password = trimmed;
+    }
+    if (patch.active !== undefined) {
+      user.active = patch.active;
+    }
   });
 }
 

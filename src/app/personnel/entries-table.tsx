@@ -5,6 +5,9 @@ import { ArrowRightCircle, Search, StickyNote } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { commission, formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { AttachmentChip } from "@/components/attachment-uploader";
+import { AttachmentViewer } from "@/components/attachment-viewer";
+import type { Attachment } from "@/lib/types";
 
 type Entry = {
   id: string;
@@ -15,6 +18,7 @@ type Entry = {
   commissionRate: number;
   status: string;
   notes: string | null;
+  attachments: Attachment[];
   cycleLabel: string;
   rolled: boolean;
 };
@@ -22,6 +26,7 @@ type Entry = {
 export function PersonnelEntriesTable({ entries }: { entries: Entry[] }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"ALL" | "PENDING" | "PAID">("ALL");
+  const [viewerEntry, setViewerEntry] = useState<Entry | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -105,11 +110,19 @@ export function PersonnelEntriesTable({ entries }: { entries: Entry[] }) {
                       {formatDate(e.saleDate)}
                     </td>
                     <td>
-                      <div className="font-medium text-slate-900 line-clamp-2">
-                        {e.description}
-                      </div>
-                      <div className="text-xs text-slate-500 truncate">
-                        {e.clientName ?? "—"}
+                      <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-slate-900 line-clamp-2">
+                            {e.description}
+                          </div>
+                          <div className="text-xs text-slate-500 truncate">
+                            {e.clientName ?? "—"}
+                          </div>
+                        </div>
+                        <AttachmentChip
+                          count={e.attachments.length}
+                          onClick={() => setViewerEntry(e)}
+                        />
                       </div>
                     </td>
                     <td>
@@ -167,6 +180,13 @@ export function PersonnelEntriesTable({ entries }: { entries: Entry[] }) {
           </tbody>
         </table>
       </div>
+
+      <AttachmentViewer
+        open={!!viewerEntry}
+        onClose={() => setViewerEntry(null)}
+        title={viewerEntry?.description ?? ""}
+        attachments={viewerEntry?.attachments ?? []}
+      />
     </div>
   );
 }

@@ -159,6 +159,7 @@ function Content({ user }: { user: SessionUser }) {
                 commissionRate: e.commissionRate,
                 status: e.status,
                 notes: e.notes,
+                attachments: e.attachments,
                 cycleLabel: cycleById.get(e.cycleId)?.label ?? "—",
                 rolled: !!e.rolledFromCycleId,
               }))}
