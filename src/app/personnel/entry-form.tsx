@@ -4,8 +4,10 @@ import { useState } from "react";
 import { Loader2, Plus } from "lucide-react";
 import { createEntry, StoreQuotaError } from "@/lib/store";
 import { AttachmentUploader } from "@/components/attachment-uploader";
+import { PdfScanCard } from "@/components/pdf-scan-card";
 import { useToast } from "@/components/toast";
 import type { Attachment } from "@/lib/types";
+import type { ScanResult } from "@/lib/pdf-scanner";
 
 export function EntryForm({ userId }: { userId: string }) {
   const today = new Date().toISOString().slice(0, 10);
@@ -24,6 +26,19 @@ export function EntryForm({ userId }: { userId: string }) {
     setSaleAmount("");
     setSaleDate(today);
     setAttachments([]);
+  }
+
+  function applyScan(result: ScanResult) {
+    setSaleAmount(String(result.saleAmount));
+    setClientName(result.clientName);
+    setDescription(result.description);
+    // Auto-attach the scanned PDF (skip if it would exceed the limit)
+    setAttachments((prev) => {
+      const exists = prev.some((a) => a.name === result.attachment.name && a.size === result.attachment.size);
+      if (exists) return prev;
+      const next = [...prev, result.attachment];
+      return next.slice(0, 3);
+    });
   }
 
   function onSubmit(e: React.FormEvent) {
@@ -66,6 +81,19 @@ export function EntryForm({ userId }: { userId: string }) {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      <PdfScanCard onApply={applyScan} />
+
+      <div className="relative">
+        <div aria-hidden className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-slate-200" />
+        </div>
+        <div className="relative flex justify-center">
+          <span className="bg-white px-2 text-[11px] uppercase tracking-wider text-slate-400">
+            Or fill in manually
+          </span>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="label" htmlFor="saleDate">

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRightCircle,
+  Calculator,
   CheckCircle2,
   FastForward,
   Loader2,
@@ -15,6 +16,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Modal } from "@/components/modal";
 import { AttachmentChip } from "@/components/attachment-uploader";
 import { AttachmentViewer } from "@/components/attachment-viewer";
+import { CommissionBreakdown } from "@/components/commission-breakdown";
 import { useToast } from "@/components/toast";
 import { commission, formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/cn";
@@ -24,6 +26,7 @@ import {
   updateEntry as storeUpdateEntry,
   StoreQuotaError,
 } from "@/lib/store";
+import { computeBreakdown } from "@/lib/commission-rules";
 import type { Attachment } from "@/lib/types";
 
 type Entry = {
@@ -56,6 +59,7 @@ export function AdminConsole({ currentCycleId, cycles, users, entries }: Props) 
   const toast = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [viewerEntry, setViewerEntry] = useState<Entry | null>(null);
+  const [breakdownEntry, setBreakdownEntry] = useState<Entry | null>(null);
   const [query, setQuery] = useState("");
   const [cycleFilter, setCycleFilter] = useState<string>(currentCycleId);
   const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING" | "PAID">(
@@ -332,6 +336,10 @@ export function AdminConsole({ currentCycleId, cycles, users, entries }: Props) 
                           }
                         />
                         <RateReadout rate={e.commissionRate} />
+                        <BreakdownButton
+                          entry={e}
+                          onClick={() => setBreakdownEntry(e)}
+                        />
                       </div>
                     </td>
                     <td>
@@ -444,7 +452,82 @@ export function AdminConsole({ currentCycleId, cycles, users, entries }: Props) 
         }
         attachments={viewerEntry?.attachments ?? []}
       />
+
+      <Modal
+        open={!!breakdownEntry}
+        onClose={() => setBreakdownEntry(null)}
+        title="Commission breakdown"
+        description={
+          breakdownEntry
+            ? `${breakdownEntry.user.fullName} · ${breakdownEntry.description}`
+            : ""
+        }
+        widthClass="max-w-2xl"
+      >
+        {breakdownEntry && (
+          <CommissionBreakdown
+            saleAmount={breakdownEntry.saleAmount}
+            description={breakdownEntry.description}
+            notes={breakdownEntry.notes}
+            currentCommission={Math.round(
+              breakdownEntry.saleAmount * breakdownEntry.commissionRate
+            )}
+            currentRate={breakdownEntry.commissionRate}
+            onApply={() => {
+              const newAmount = Math.round(
+                computeBreakdown({
+                  saleAmount: breakdownEntry.saleAmount,
+                  description: breakdownEntry.description,
+                  notes: breakdownEntry.notes,
+                }).total
+              );
+              patchEntry(breakdownEntry.id, { commissionAmount: newAmount });
+              setBreakdownEntry(null);
+              toast.success(
+                "Applied system commission",
+                `Set to ${formatCurrency(newAmount)}`
+              );
+            }}
+          />
+        )}
+      </Modal>
     </section>
+  );
+}
+
+function BreakdownButton({
+  entry,
+  onClick,
+}: {
+  entry: Entry;
+  onClick: () => void;
+}) {
+  const breakdown = computeBreakdown({
+    saleAmount: entry.saleAmount,
+    description: entry.description,
+    notes: entry.notes,
+  });
+  const current = Math.round(entry.saleAmount * entry.commissionRate);
+  const matches = Math.abs(breakdown.total - current) < 1;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 transition-colors",
+        matches
+          ? "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100"
+          : "bg-amber-50 text-amber-700 ring-amber-200 hover:bg-amber-100"
+      )}
+      title={
+        matches
+          ? "Current matches the system-computed commission"
+          : `System suggests ${formatCurrency(breakdown.total)}`
+      }
+    >
+      <Calculator className="h-2.5 w-2.5" />
+      {matches ? "OK" : "≠"}
+    </button>
   );
 }
 
